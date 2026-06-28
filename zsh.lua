@@ -506,7 +506,7 @@ while running do
         add_to_history(cmd)
         if cmd == "exit" or cmd == "logout" then
             running = false
-            print("Выход из оболочки...")
+            print("exiting the shell...")
         else
             execute_command(cmd)
         end
