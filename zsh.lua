@@ -1,21 +1,20 @@
 -- =====================================================
 -- ZSH-подобная оболочка для CC: Tweaked
--- Версия 3.0 (без require shell)
+-- Версия 4.0 (ASCII, правильный ввод)
 -- =====================================================
 
--- Используем только глобальные API
 local fs = fs
 local term = term
 local os = os
 local colors = colors
 local textutils = textutils
+local io = io
 
 -- =====================================================
 -- НАСТРОЙКИ
 -- =====================================================
 local config = {
-    prompt_color = colors.lime,
-    prompt_symbol = "❯",
+    prompt_symbol = ">",
     history_file = ".zsh_history",
     max_history = 100,
     aliases = {
@@ -23,7 +22,6 @@ local config = {
         ["la"] = "ls -a",
         [".."] = "cd ..",
         ["..."] = "cd ../..",
-        ["grep"] = "find",
         ["cls"] = "clear",
         ["edit"] = "edit",
         ["reboot"] = "reboot",
@@ -37,12 +35,12 @@ local config = {
 local history = {}
 local current_dir = "/"
 local previous_dir = nil
+local history_index = 0
 
 -- =====================================================
 -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 -- =====================================================
 
--- Чтение истории из файла
 local function load_history()
     if fs.exists(config.history_file) then
         local file = io.open(config.history_file, "r")
@@ -57,28 +55,28 @@ local function load_history()
     end
 end
 
--- Сохранение истории в файл
 local function save_history()
     local file = io.open(config.history_file, "w")
     if file then
-        for i = #history - math.min(#history, config.max_history) + 1, #history do
+        local start = math.max(1, #history - config.max_history + 1)
+        for i = start, #history do
             file:write(history[i] .. "\n")
         end
         file:close()
     end
 end
 
--- Добавление команды в историю
 local function add_to_history(cmd)
     if cmd and cmd ~= "" then
         table.insert(history, cmd)
+        if #history > config.max_history then
+            table.remove(history, 1)
+        end
         save_history()
     end
 end
 
--- Поиск команд
 local function find_command(cmd)
-    -- Встроенные команды
     local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
                            "alias", "unalias", "history", "export", "unset"}
     for _, b in ipairs(builtins_list) do
@@ -87,23 +85,15 @@ local function find_command(cmd)
         end
     end
     
-    -- Поиск в текущей директории
+    -- Текущая директория
     local full_path = fs.combine(current_dir, cmd)
     if fs.exists(full_path) and not fs.isDirectory(full_path) then
         return full_path
     end
     
-    -- Поиск в /rom/programs
+    -- /rom/programs
     if fs.exists("/rom/programs") then
         local prog_path = fs.combine("/rom/programs", cmd)
-        if fs.exists(prog_path) and not fs.isDirectory(prog_path) then
-            return prog_path
-        end
-    end
-    
-    -- Поиск в /rom/programs/
-    if fs.exists("/rom/programs/") then
-        local prog_path = fs.combine("/rom/programs/", cmd)
         if fs.exists(prog_path) and not fs.isDirectory(prog_path) then
             return prog_path
         end
@@ -112,12 +102,10 @@ local function find_command(cmd)
     return nil
 end
 
--- Автодополнение
 local function complete_command(partial)
     local matches = {}
     local partial_lower = partial:lower()
     
-    -- Встроенные команды
     local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
                            "alias", "unalias", "history", "export", "unset"}
     for _, cmd in ipairs(builtins_list) do
@@ -126,7 +114,6 @@ local function complete_command(partial)
         end
     end
     
-    -- Файлы в текущей директории
     if fs.exists(current_dir) then
         for file in fs.list(current_dir) do
             if file:lower():sub(1, #partial_lower) == partial_lower then
@@ -140,7 +127,6 @@ local function complete_command(partial)
         end
     end
     
-    -- Программы в /rom/programs
     if fs.exists("/rom/programs") then
         for file in fs.list("/rom/programs") do
             if file:lower():sub(1, #partial_lower) == partial_lower then
@@ -165,9 +151,8 @@ function builtins.cd(args)
         target = previous_dir or "/"
     end
     
-    previous_dir = current_dir
-    
     if fs.exists(target) and fs.isDirectory(target) then
+        previous_dir = current_dir
         current_dir = fs.canonical(target)
         return true
     else
@@ -240,9 +225,6 @@ end
 
 function builtins.echo(args)
     local output = table.concat(args, " ")
-    output = output:gsub("%$([%w_]+)", function(var)
-        return os.getenv(var) or "$" .. var
-    end)
     print(output)
     return true
 end
@@ -270,27 +252,27 @@ function builtins.clear()
 end
 
 function builtins.help()
-    print(colors.cyan .. "=== ZSH для CC: Tweaked ===" .. colors.white)
+    print(colors.cyan .. "=== ZSH Shell for CC: Tweaked ===" .. colors.white)
     print("")
-    print(colors.yellow .. "Встроенные команды:" .. colors.white)
-    print("  cd [dir]     - Перейти в директорию")
-    print("  ls [-a] [-l] - Показать содержимое")
-    print("  pwd          - Показать текущую директорию")
-    print("  echo [text]  - Вывести текст")
-    print("  cat [file]   - Показать содержимое файла")
-    print("  clear/cls    - Очистить экран")
-    print("  help         - Показать эту справку")
-    print("  alias [name] [cmd] - Создать алиас")
-    print("  unalias [name] - Удалить алиас")
-    print("  history      - Показать историю команд")
-    print("  export NAME=value - Установить переменную")
-    print("  unset NAME   - Удалить переменную")
+    print(colors.yellow .. "Built-in commands:" .. colors.white)
+    print("  cd [dir]     - Change directory")
+    print("  ls [-a] [-l] - List directory contents")
+    print("  pwd          - Print working directory")
+    print("  echo [text]  - Print text")
+    print("  cat [file]   - Print file contents")
+    print("  clear        - Clear screen")
+    print("  help         - Show this help")
+    print("  alias [name] [cmd] - Create alias")
+    print("  unalias [name] - Remove alias")
+    print("  history      - Show command history")
+    print("  export NAME=value - Set environment variable")
+    print("  unset NAME   - Unset environment variable")
     print("")
-    print(colors.yellow .. "Особенности:" .. colors.white)
-    print("  • Автодополнение по Tab")
-    print("  • История команд (↑/↓)")
-    print("  • Алиасы")
-    print("  • Переменные окружения")
+    print(colors.yellow .. "Features:" .. colors.white)
+    print("  * Tab completion")
+    print("  * Command history (Up/Down arrows)")
+    print("  * Aliases")
+    print("  * Environment variables")
     return true
 end
 
@@ -306,12 +288,12 @@ function builtins.alias(args)
     local cmd = table.concat(args, " ", 2)
     if cmd ~= "" then
         config.aliases[name] = cmd
-        print("Алиас создан: " .. name .. " -> " .. cmd)
+        print("Alias created: " .. name .. " -> " .. cmd)
     else
         if config.aliases[name] then
             print(name .. " = '" .. config.aliases[name] .. "'")
         else
-            print("Алиас не найден: " .. name)
+            print("Alias not found: " .. name)
         end
     end
     return true
@@ -319,22 +301,23 @@ end
 
 function builtins.unalias(args)
     if #args == 0 then
-        print("Использование: unalias [name]")
+        print("Usage: unalias [name]")
         return false
     end
     
     local name = args[1]
     if config.aliases[name] then
         config.aliases[name] = nil
-        print("Алиас удалён: " .. name)
+        print("Alias removed: " .. name)
     else
-        print("Алиас не найден: " .. name)
+        print("Alias not found: " .. name)
     end
     return true
 end
 
 function builtins.history()
-    for i = math.max(1, #history - 20), #history do
+    local start = math.max(1, #history - 20)
+    for i = start, #history do
         print(string.format("%5d  %s", i, history[i]))
     end
     return true
@@ -345,9 +328,9 @@ function builtins.export(args)
         local name, value = arg:match("^([%w_]+)=(.+)$")
         if name then
             os.setenv(name, value)
-            print("Переменная установлена: " .. name .. "=" .. value)
+            print("Variable set: " .. name .. "=" .. value)
         else
-            print(colors.red .. "export: неправильный формат. Используйте NAME=value" .. colors.white)
+            print(colors.red .. "export: invalid format. Use NAME=value" .. colors.white)
         end
     end
     return true
@@ -356,13 +339,71 @@ end
 function builtins.unset(args)
     for _, name in ipairs(args) do
         os.setenv(name, nil)
-        print("Переменная удалена: " .. name)
+        print("Variable unset: " .. name)
     end
     return true
 end
 
 -- =====================================================
--- ГЛАВНЫЙ ЦИКЛ
+-- ВВОД СТРОКИ
+-- =====================================================
+
+local function read_line()
+    local line = ""
+    local cursor = 1
+    history_index = #history + 1
+    
+    while true do
+        term.setCursorPos(1, 1)
+        term.clearLine()
+        term.write(config.prompt_symbol .. " ")
+        term.write(line)
+        
+        local event, key, arg = os.pullEvent("key")
+        
+        if key == 28 then -- Enter
+            term.write("\n")
+            return line
+        elseif key == 14 then -- Backspace
+            if #line > 0 then
+                line = line:sub(1, -2)
+            end
+        elseif key == 15 then -- Tab
+            if #line > 0 then
+                local matches = complete_command(line)
+                if #matches > 0 then
+                    line = matches[1]
+                end
+            end
+        elseif key == 200 then -- Up arrow
+            if history_index > 1 then
+                history_index = history_index - 1
+                line = history[history_index] or ""
+            end
+        elseif key == 208 then -- Down arrow
+            if history_index < #history then
+                history_index = history_index + 1
+                line = history[history_index] or ""
+            else
+                history_index = #history + 1
+                line = ""
+            end
+        elseif key == 203 then -- Left arrow
+            -- Простая реализация, можно улучшить
+        elseif key == 205 then -- Right arrow
+            -- Простая реализация, можно улучшить
+        else
+            -- Печатаемые символы (ASCII)
+            local char = string.char(key)
+            if key >= 32 and key <= 126 then
+                line = line .. char
+            end
+        end
+    end
+end
+
+-- =====================================================
+-- ОСНОВНОЙ ЦИКЛ
 -- =====================================================
 
 local function get_prompt()
@@ -370,20 +411,17 @@ local function get_prompt()
     if dir_name == "" then dir_name = "/" end
     
     return string.format(
-        "%s[%s%s%s] %s%s ",
+        "%s[%s%s%s] ",
         colors.cyan,
         colors.green,
         dir_name,
-        colors.cyan,
-        colors.white,
-        config.prompt_symbol
+        colors.cyan
     )
 end
 
 local function execute_command(cmd)
     if cmd == "" then return true end
     
-    -- Разбор команды
     local parts = {}
     for part in cmd:gmatch("%S+") do
         table.insert(parts, part)
@@ -392,7 +430,6 @@ local function execute_command(cmd)
     local command = parts[1]
     local args = {table.unpack(parts, 2)}
     
-    -- Проверка алиаса
     if config.aliases[command] then
         local alias_cmd = config.aliases[command]
         local alias_parts = {}
@@ -406,20 +443,16 @@ local function execute_command(cmd)
         end
     end
     
-    -- Встроенные команды
     if builtins[command] then
         return builtins[command](args)
     end
     
-    -- Внешние программы
     local program_path = find_command(command)
     if program_path and program_path ~= "builtin" then
-        -- Создаём команду для запуска
         local full_cmd = program_path
         if #args > 0 then
             full_cmd = full_cmd .. " " .. table.concat(args, " ")
         end
-        -- Запускаем через shell
         local result = os.execute(full_cmd)
         return result == 0 or result == true
     else
@@ -428,85 +461,28 @@ local function execute_command(cmd)
     end
 end
 
--- Загрузка истории
+-- =====================================================
+-- ЗАПУСК
+-- =====================================================
+
 load_history()
 
--- =====================================================
--- ВВОД С АВТОДОПОЛНЕНИЕМ
--- =====================================================
-
-local function read_line_with_features()
-    local line = ""
-    local history_pos = #history + 1
-    local completion_matches = {}
-    local completion_index = 0
-    
-    while true do
-        term.setCursorPos(1, 1)
-        term.clearLine()
-        term.write(get_prompt())
-        term.write(line)
-        
-        local char = term.read()
-        
-        if char == "\n" or char == "\r" then
-            term.write("\n")
-            return line
-        elseif char == "\t" then
-            if #line > 0 then
-                local partial = line
-                if #completion_matches > 0 and completion_index <= #completion_matches then
-                    completion_index = completion_index + 1
-                    if completion_index > #completion_matches then
-                        completion_index = 1
-                        completion_matches = complete_command(partial)
-                    end
-                    if completion_matches[completion_index] then
-                        line = completion_matches[completion_index]
-                    end
-                else
-                    completion_matches = complete_command(partial)
-                    completion_index = 1
-                    if #completion_matches > 0 then
-                        line = completion_matches[1]
-                    end
-                end
-            end
-        elseif char == "\127" then
-            if #line > 0 then
-                line = line:sub(1, -2)
-            end
-        elseif char == "\27" then
-            local seq = term.read() .. term.read()
-            if seq == "[A" then
-                if history_pos > 1 then
-                    history_pos = history_pos - 1
-                    line = history[history_pos] or ""
-                end
-            elseif seq == "[B" then
-                if history_pos < #history then
-                    history_pos = history_pos + 1
-                    line = history[history_pos] or ""
-                else
-                    history_pos = #history + 1
-                    line = ""
-                end
-            end
-        else
-            line = line .. char
-        end
-    end
-end
+print(colors.cyan .. "+===============================================+")
+print("|     ZSH-like Shell for CC: Tweaked         |")
+print("|          Version 4.0  |  Type 'help'        |")
+print(colors.cyan .. "+===============================================+" .. colors.white)
+print("")
 
 local running = true
 while running do
-    local cmd = read_line_with_features()
+    term.write(get_prompt())
+    local cmd = read_line()
     
     if cmd then
         add_to_history(cmd)
         if cmd == "exit" or cmd == "logout" then
             running = false
-            print("exiting the shell...")
+            print("Exiting shell...")
         else
             execute_command(cmd)
         end
