@@ -1,14 +1,15 @@
 -- =====================================================
 -- ZSH-подобная оболочка для CC: Tweaked
--- Версия 1.0
+-- Версия 2.0 (исправленная)
 -- =====================================================
 
-local shell = require("shell")
-local fs = require("filesystem")
-local term = require("term")
-local colors = require("colors")
-local os = require("os")
-local textutils = require("textutils")
+-- Глобальные API (доступны всегда)
+local fs = fs or require("filesystem")
+local term = term or require("term")
+local os = os or require("os")
+local colors = colors or require("colors")
+local textutils = textutils or require("textutils")
+local shell = shell or require("shell")
 
 -- =====================================================
 -- НАСТРОЙКИ
@@ -16,7 +17,7 @@ local textutils = require("textutils")
 local config = {
     prompt_color = colors.lime,
     prompt_symbol = "❯",
-    show_git_status = true,
+    show_git_status = false,  -- Отключено для скорости
     history_file = ".zsh_history",
     max_history = 100,
     aliases = {
@@ -36,8 +37,8 @@ local config = {
 -- ОСНОВНЫЕ ПЕРЕМЕННЫЕ
 -- =====================================================
 local history = {}
-local current_dir = shell.dir()
-local prompt = ""
+local current_dir = os.getenv("PWD") or "/"
+local previous_dir = nil
 
 -- =====================================================
 -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -77,43 +78,33 @@ local function add_to_history(cmd)
     end
 end
 
--- Получение цвета для Git-статуса (имитация)
-local function get_git_status()
-    if not config.show_git_status then return "" end
-    
-    -- Проверяем, есть ли папка .git
-    if fs.exists(".git") and fs.isDirectory(".git") then
-        -- Простая имитация: проверяем изменение файлов
-        local has_changes = false
-        for file in fs.list(".") do
-            if file:match("%.lua$") then
-                local path = fs.path(file)
-                if fs.exists(path) then
-                    -- Если файл существует, считаем его "изменённым" (имитация)
-                    has_changes = true
-                    break
-                end
-            end
-        end
-        
-        if has_changes then
-            return " " .. colors.yellow .. "✗" .. colors.white
-        else
-            return " " .. colors.green .. "✓" .. colors.white
-        end
-    end
-    return ""
-end
-
 -- Поиск команд в PATH
 local function find_command(cmd)
-    local paths = {"", "/rom/programs/", "/rom/programs/"}
+    -- Проверяем встроенные команды
+    local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
+                           "alias", "unalias", "history", "export", "unset"}
+    for _, b in ipairs(builtins_list) do
+        if b == cmd then
+            return "builtin"
+        end
+    end
+    
+    -- Проверка внешних программ
+    local paths = {
+        "",
+        "/rom/programs/",
+        "/rom/programs/",
+        "/rom/programs/",
+        "/rom/programs/"
+    }
+    
     for _, path in ipairs(paths) do
-        local full_path = path .. cmd
+        local full_path = fs.combine(path, cmd)
         if fs.exists(full_path) and not fs.isDirectory(full_path) then
             return full_path
         end
     end
+    
     return nil
 end
 
@@ -123,28 +114,34 @@ local function complete_command(partial)
     local partial_lower = partial:lower()
     
     -- Поиск встроенных команд
-    local builtins = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", "alias", "unalias", "history", "export", "unset"}
-    for _, cmd in ipairs(builtins) do
+    local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
+                           "alias", "unalias", "history", "export", "unset"}
+    for _, cmd in ipairs(builtins_list) do
         if cmd:sub(1, #partial_lower):lower() == partial_lower then
             table.insert(matches, cmd)
         end
     end
     
     -- Поиск файлов в текущей директории
-    for file in fs.list(current_dir) do
-        if file:lower():sub(1, #partial_lower) == partial_lower then
-            if fs.isDirectory(fs.combine(current_dir, file)) then
-                table.insert(matches, file .. "/")
-            else
-                table.insert(matches, file)
+    if fs.exists(current_dir) then
+        for file in fs.list(current_dir) do
+            if file:lower():sub(1, #partial_lower) == partial_lower then
+                local full_path = fs.combine(current_dir, file)
+                if fs.isDirectory(full_path) then
+                    table.insert(matches, file .. "/")
+                else
+                    table.insert(matches, file)
+                end
             end
         end
     end
     
     -- Поиск программ в /rom/programs
-    for file in fs.list("/rom/programs/") do
-        if file:lower():sub(1, #partial_lower) == partial_lower then
-            table.insert(matches, file)
+    if fs.exists("/rom/programs") then
+        for file in fs.list("/rom/programs") do
+            if file:lower():sub(1, #partial_lower) == partial_lower then
+                table.insert(matches, file)
+            end
         end
     end
     
@@ -161,7 +158,6 @@ function builtins.cd(args)
     local target = args[1] or "/"
     if target == "~" then target = "/" end
     if target == "-" then
-        -- Возврат в предыдущую директорию
         target = previous_dir or "/"
     end
     
@@ -169,7 +165,7 @@ function builtins.cd(args)
     
     if fs.exists(target) and fs.isDirectory(target) then
         current_dir = fs.canonical(target)
-        shell.setDir(current_dir)
+        os.setenv("PWD", current_dir)
         return true
     else
         print(colors.red .. "cd: " .. target .. ": No such directory" .. colors.white)
@@ -292,7 +288,6 @@ function builtins.help()
     print("  • Автодополнение по Tab")
     print("  • История команд (↑/↓)")
     print("  • Алиасы (см. config.aliases)")
-    print("  • Git-подобный статус")
     print("  • Переменные окружения")
     return true
 end
@@ -372,17 +367,14 @@ local function get_prompt()
     local dir_name = fs.getName(current_dir)
     if dir_name == "" then dir_name = "/" end
     
-    local git_status = get_git_status()
-    
     return string.format(
-        "%s[%s%s%s] %s%s%s ",
+        "%s[%s%s%s] %s%s ",
         colors.cyan,
         colors.green,
         dir_name,
         colors.cyan,
         colors.white,
-        config.prompt_symbol,
-        git_status or ""
+        config.prompt_symbol
     )
 end
 
@@ -418,11 +410,12 @@ local function execute_command(cmd)
     end
     
     -- Попытка запустить внешнюю программу
-    local program = find_command(command)
-    if program then
+    local program_path = find_command(command)
+    if program_path and program_path ~= "builtin" then
         -- Запуск программы с аргументами
         local cmd_str = command .. " " .. table.concat(args, " ")
-        return os.execute(cmd_str) == 0
+        local result = os.execute(cmd_str)
+        return result == 0 or result == true
     else
         print(colors.red .. "zsh: command not found: " .. command .. colors.white)
         return false
@@ -438,10 +431,9 @@ load_history()
 
 local function read_line_with_features()
     local line = ""
-    local cursor_pos = 1
     local history_pos = #history + 1
     local completion_matches = {}
-    local completion_index = 1
+    local completion_index = 0
     
     while true do
         -- Показываем промпт
@@ -458,13 +450,17 @@ local function read_line_with_features()
         elseif char == "\t" then -- Tab - автодополнение
             if #line > 0 then
                 local partial = line
-                if completion_matches and #completion_matches > 0 then
-                    completion_index = (completion_index % #completion_matches) + 1
-                    line = completion_matches[completion_index]
+                if #completion_matches > 0 and completion_index <= #completion_matches then
+                    completion_index = completion_index + 1
+                    if completion_index > #completion_matches then
+                        completion_index = 1
+                        completion_matches = complete_command(partial)
+                    end
+                    line = completion_matches[completion_index] or partial
                 else
                     completion_matches = complete_command(partial)
+                    completion_index = 1
                     if #completion_matches > 0 then
-                        completion_index = 1
                         line = completion_matches[1]
                     end
                 end
@@ -495,6 +491,10 @@ local function read_line_with_features()
     end
 end
 
+-- =====================================================
+-- ЗАПУСК ОБОЛОЧКИ
+-- =====================================================
+
 local running = true
 while running do
     local cmd = read_line_with_features()
@@ -505,10 +505,7 @@ while running do
             running = false
             print("Выход из оболочки...")
         else
-            local success = execute_command(cmd)
-            if not success and cmd ~= "" then
-                -- Команда не найдена
-            end
+            execute_command(cmd)
         end
     end
 end
