@@ -491,10 +491,6 @@ local function read_line_with_features()
     end
 end
 
--- =====================================================
--- ЗАПУСК ОБОЛОЧКИ
--- =====================================================
-
 local running = true
 while running do
     local cmd = read_line_with_features()
