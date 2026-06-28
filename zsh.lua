@@ -1,15 +1,14 @@
 -- =====================================================
 -- ZSH-подобная оболочка для CC: Tweaked
--- Версия 2.0 (исправленная)
+-- Версия 3.0 (без require shell)
 -- =====================================================
 
--- Глобальные API (доступны всегда)
-local fs = fs or require("filesystem")
-local term = term or require("term")
-local os = os or require("os")
-local colors = colors or require("colors")
-local textutils = textutils or require("textutils")
-local shell = shell or require("shell")
+-- Используем только глобальные API
+local fs = fs
+local term = term
+local os = os
+local colors = colors
+local textutils = textutils
 
 -- =====================================================
 -- НАСТРОЙКИ
@@ -17,7 +16,6 @@ local shell = shell or require("shell")
 local config = {
     prompt_color = colors.lime,
     prompt_symbol = "❯",
-    show_git_status = false,  -- Отключено для скорости
     history_file = ".zsh_history",
     max_history = 100,
     aliases = {
@@ -37,7 +35,7 @@ local config = {
 -- ОСНОВНЫЕ ПЕРЕМЕННЫЕ
 -- =====================================================
 local history = {}
-local current_dir = os.getenv("PWD") or "/"
+local current_dir = "/"
 local previous_dir = nil
 
 -- =====================================================
@@ -78,9 +76,9 @@ local function add_to_history(cmd)
     end
 end
 
--- Поиск команд в PATH
+-- Поиск команд
 local function find_command(cmd)
-    -- Проверяем встроенные команды
+    -- Встроенные команды
     local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
                            "alias", "unalias", "history", "export", "unset"}
     for _, b in ipairs(builtins_list) do
@@ -89,19 +87,25 @@ local function find_command(cmd)
         end
     end
     
-    -- Проверка внешних программ
-    local paths = {
-        "",
-        "/rom/programs/",
-        "/rom/programs/",
-        "/rom/programs/",
-        "/rom/programs/"
-    }
+    -- Поиск в текущей директории
+    local full_path = fs.combine(current_dir, cmd)
+    if fs.exists(full_path) and not fs.isDirectory(full_path) then
+        return full_path
+    end
     
-    for _, path in ipairs(paths) do
-        local full_path = fs.combine(path, cmd)
-        if fs.exists(full_path) and not fs.isDirectory(full_path) then
-            return full_path
+    -- Поиск в /rom/programs
+    if fs.exists("/rom/programs") then
+        local prog_path = fs.combine("/rom/programs", cmd)
+        if fs.exists(prog_path) and not fs.isDirectory(prog_path) then
+            return prog_path
+        end
+    end
+    
+    -- Поиск в /rom/programs/
+    if fs.exists("/rom/programs/") then
+        local prog_path = fs.combine("/rom/programs/", cmd)
+        if fs.exists(prog_path) and not fs.isDirectory(prog_path) then
+            return prog_path
         end
     end
     
@@ -113,7 +117,7 @@ local function complete_command(partial)
     local matches = {}
     local partial_lower = partial:lower()
     
-    -- Поиск встроенных команд
+    -- Встроенные команды
     local builtins_list = {"cd", "ls", "pwd", "echo", "cat", "clear", "help", 
                            "alias", "unalias", "history", "export", "unset"}
     for _, cmd in ipairs(builtins_list) do
@@ -122,7 +126,7 @@ local function complete_command(partial)
         end
     end
     
-    -- Поиск файлов в текущей директории
+    -- Файлы в текущей директории
     if fs.exists(current_dir) then
         for file in fs.list(current_dir) do
             if file:lower():sub(1, #partial_lower) == partial_lower then
@@ -136,7 +140,7 @@ local function complete_command(partial)
         end
     end
     
-    -- Поиск программ в /rom/programs
+    -- Программы в /rom/programs
     if fs.exists("/rom/programs") then
         for file in fs.list("/rom/programs") do
             if file:lower():sub(1, #partial_lower) == partial_lower then
@@ -165,7 +169,6 @@ function builtins.cd(args)
     
     if fs.exists(target) and fs.isDirectory(target) then
         current_dir = fs.canonical(target)
-        os.setenv("PWD", current_dir)
         return true
     else
         print(colors.red .. "cd: " .. target .. ": No such directory" .. colors.white)
@@ -237,7 +240,6 @@ end
 
 function builtins.echo(args)
     local output = table.concat(args, " ")
-    -- Обработка переменных $VAR
     output = output:gsub("%$([%w_]+)", function(var)
         return os.getenv(var) or "$" .. var
     end)
@@ -287,7 +289,7 @@ function builtins.help()
     print(colors.yellow .. "Особенности:" .. colors.white)
     print("  • Автодополнение по Tab")
     print("  • История команд (↑/↓)")
-    print("  • Алиасы (см. config.aliases)")
+    print("  • Алиасы")
     print("  • Переменные окружения")
     return true
 end
@@ -360,7 +362,7 @@ function builtins.unset(args)
 end
 
 -- =====================================================
--- ГЛАВНЫЙ ЦИКЛ ОБОЛОЧКИ
+-- ГЛАВНЫЙ ЦИКЛ
 -- =====================================================
 
 local function get_prompt()
@@ -381,7 +383,7 @@ end
 local function execute_command(cmd)
     if cmd == "" then return true end
     
-    -- Проверка на алиас
+    -- Разбор команды
     local parts = {}
     for part in cmd:gmatch("%S+") do
         table.insert(parts, part)
@@ -390,7 +392,7 @@ local function execute_command(cmd)
     local command = parts[1]
     local args = {table.unpack(parts, 2)}
     
-    -- Замена алиаса
+    -- Проверка алиаса
     if config.aliases[command] then
         local alias_cmd = config.aliases[command]
         local alias_parts = {}
@@ -404,17 +406,21 @@ local function execute_command(cmd)
         end
     end
     
-    -- Проверка встроенных команд
+    -- Встроенные команды
     if builtins[command] then
         return builtins[command](args)
     end
     
-    -- Попытка запустить внешнюю программу
+    -- Внешние программы
     local program_path = find_command(command)
     if program_path and program_path ~= "builtin" then
-        -- Запуск программы с аргументами
-        local cmd_str = command .. " " .. table.concat(args, " ")
-        local result = os.execute(cmd_str)
+        -- Создаём команду для запуска
+        local full_cmd = program_path
+        if #args > 0 then
+            full_cmd = full_cmd .. " " .. table.concat(args, " ")
+        end
+        -- Запускаем через shell
+        local result = os.execute(full_cmd)
         return result == 0 or result == true
     else
         print(colors.red .. "zsh: command not found: " .. command .. colors.white)
@@ -426,7 +432,7 @@ end
 load_history()
 
 -- =====================================================
--- ВВОД С АВТОДОПОЛНЕНИЕМ И ИСТОРИЕЙ
+-- ВВОД С АВТОДОПОЛНЕНИЕМ
 -- =====================================================
 
 local function read_line_with_features()
@@ -436,7 +442,6 @@ local function read_line_with_features()
     local completion_index = 0
     
     while true do
-        -- Показываем промпт
         term.setCursorPos(1, 1)
         term.clearLine()
         term.write(get_prompt())
@@ -447,7 +452,7 @@ local function read_line_with_features()
         if char == "\n" or char == "\r" then
             term.write("\n")
             return line
-        elseif char == "\t" then -- Tab - автодополнение
+        elseif char == "\t" then
             if #line > 0 then
                 local partial = line
                 if #completion_matches > 0 and completion_index <= #completion_matches then
@@ -456,7 +461,9 @@ local function read_line_with_features()
                         completion_index = 1
                         completion_matches = complete_command(partial)
                     end
-                    line = completion_matches[completion_index] or partial
+                    if completion_matches[completion_index] then
+                        line = completion_matches[completion_index]
+                    end
                 else
                     completion_matches = complete_command(partial)
                     completion_index = 1
@@ -465,18 +472,18 @@ local function read_line_with_features()
                     end
                 end
             end
-        elseif char == "\127" then -- Backspace
+        elseif char == "\127" then
             if #line > 0 then
                 line = line:sub(1, -2)
             end
-        elseif char == "\27" then -- Escape sequence
+        elseif char == "\27" then
             local seq = term.read() .. term.read()
-            if seq == "[A" then -- Up arrow
+            if seq == "[A" then
                 if history_pos > 1 then
                     history_pos = history_pos - 1
                     line = history[history_pos] or ""
                 end
-            elseif seq == "[B" then -- Down arrow
+            elseif seq == "[B" then
                 if history_pos < #history then
                     history_pos = history_pos + 1
                     line = history[history_pos] or ""
